@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>بازی گردونه و مسیر (نسخه پایدار)</title>
+    
+    <!-- این خط برای کاغذرنگی است، اگر اینترنت نبود بازی به کار خود ادامه می‌دهد -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
+
+        :root {
+            --cell-size: 100px; 
+            --cell-gap: 10px;   
+            --board-padding: 15px;
+            --player-size: 70px; 
+            --wheel-size: 300px; 
+        }
+
+        body {
+            font-family: 'Vazirmatn', sans-serif;
+            background-color: #e3f2fd; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; 
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* استایل کادر بالای صفحه */
+        #top-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            z-index: 20;
+        }
+
+        #score-board, #move-board {
+            font-size: 24px; font-weight: 900; color: #f57f17;
+            background: #fff9c4; padding: 10px 25px; border-radius: 20px;
+            border: 4px solid #fbc02d; box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            display: flex; align-items: center; gap: 10px;
+            transition: transform 0.2s;
+        }
+
+        #move-board {
+            color: #1976d2; background: #e3f2fd; border-color: #64b5f6;
+        }
+        
+        #score-board.bump, #move-board.bump { transform: scale(1.15); }
+
+        #credits-footer {
+            position: fixed; bottom: 15px; left: 50%;
+            transform: translateX(-50%);
+            font-size: 18px; font-weight: 900; color: #455a64;
+            background: rgba(255, 255, 255, 0.9); padding: 8px 25px;
+            border-radius: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            z-index: 50; border: 2px solid #b0bec5;
+        }
+
+        #mute-btn {
+            position: fixed; top: 20px; right: 20px;
+            font-size: 30px; background: white; border: 3px solid #90caf9;
+            border-radius: 50%; width: 60px; height: 60px; cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 100; transition: transform 0.2s;
+        }
+        #mute-btn:hover { transform: scale(1.1); }
+
+        .game-container {
+            display: flex; flex-wrap: wrap; gap: 60px;
+            align-items: center; justify-content: center;
+            background: white; padding: 30px 60px; border-radius: 30px;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+            max-width: 95vw; z-index: 10; position: relative;
+        }
+
+        .board-wrapper { position: relative; }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(4, var(--cell-size));
+            grid-template-rows: repeat(4, var(--cell-size));
+            gap: var(--cell-gap); background-color: #dcedc8;
+            padding: var(--board-padding); border-radius: 20px;
+            border: 6px solid #8bc34a; position: relative;
+            direction: ltr; touch-action: none;
+        }
+
+        .cell {
+            background-color: #f9fbe7; border: 3px solid #c5e1a5;
+            border-radius: 12px; display: flex; align-items: center;
+            justify-content: center; font-size: 18px; font-weight: bold;
+        }
+
+        .start-cell { background-color: #ffcc80; border-color: #ff9800; color: #e65100; }
+        .end-cell { background-color: #81d4fa; border-color: #03a9f4; color: #01579b; }
+
+        /* مهره بازیکن */
+        .player {
+            width: var(--player-size); height: var(--player-size);
+            background-color: #e91e63; border-radius: 50%;
+            position: absolute;
+            transition: transform 0.3s ease, left 0.3s ease, top 0.3s ease, background-color 0.3s;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 10; cursor: grab; border: 3px solid #fff;
+        }
+        
+        .player:active { cursor: grabbing; }
+        .player span { font-size: 40px; line-height: 1; transition: transform 0.2s; }
+
+        @keyframes stepJump {
+            0%, 100% { transform: translateY(0) scale(1); }
+            25% { transform: translateY(-20px) scale(1.1); }
+            50% { transform: translateY(0) scale(1); }
+            75% { transform: translateY(-15px) scale(1.1); }
+        }
+        .player.step-bounce { animation: stepJump 0.6s ease-in-out; }
+
+        @keyframes victoryDance {
+            0%, 100% { transform: translateY(0) scale(1) rotate(0deg); }
+            20% { transform: translateY(-35px) scale(1.2) rotate(-15deg); }
+            40% { transform: translateY(0) scale(1) rotate(0deg); }
+            60% { transform: translateY(-35px) scale(1.2) rotate(15deg); }
+            80% { transform: translateY(0) scale(1) rotate(0deg); }
+        }
+        .player.victory-dance {
+            animation: victoryDance 0.8s infinite; 
+            z-index: 20;
+            background-color: #ffeb3b; 
+            box-shadow: 0 0 30px #ffeb3b, 0 0 50px #ff9800; 
+        }
+
+        .floating-emoji {
+            position: absolute; font-size: 35px; pointer-events: none;
+            z-index: 20; animation: floatUpFade 1s ease-out forwards;
+        }
+
+        @keyframes floatUpFade {
+            0% { opacity: 1; transform: translateY(0) scale(0.5); }
+            50% { opacity: 1; transform: translateY(-40px) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-80px) scale(0.8); }
+        }
+
+        #flower-rain {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 900; overflow: hidden;
+        }
+
+        .falling-emoji {
+            position: absolute; top: -50px; animation: fall linear forwards;
+        }
+
+        @keyframes fall {
+            0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(110vh) rotate(360deg); opacity: 0.8; }
+        }
+
+        /* --- گردونه و سنجاقک (با پشتیبان برای مرورگرهای قدیمی) --- */
+        .wheel-section {
+            display: flex; flex-direction: column; align-items: center; gap: 30px;
+        }
+
+        .wheel-container {
+            position: relative; width: var(--wheel-size); height: var(--wheel-size);
+            border-radius: 50%;
+            background-color: #f39c12; /* رنگ پیش‌فرض اگر مرورگر گرادیان را نشناسد */
+            background: conic-gradient(
+                from -45deg,
+                #f39c12 0deg 90deg,   
+                #8bc34a 90deg 180deg, 
+                #03a9f4 180deg 270deg,
+                #ffeb3b 270deg 360deg 
+            );
+            border: 12px solid #fff; box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+        }
+
+        .fixed-arrow { position: absolute; font-size: 50px; font-weight: bold; color: #333; z-index: 2; text-shadow: 1px 1px 3px rgba(255,255,255,0.8); }
+        .arrow-up { top: 20px; left: 50%; transform: translateX(-50%); }
+        .arrow-down { bottom: 20px; left: 50%; transform: translateX(-50%); }
+        .arrow-right { right: 20px; top: 50%; transform: translateY(-50%); }
+        .arrow-left { left: 20px; top: 50%; transform: translateY(-50%); }
+
+        .dragonfly-pointer {
+            position: absolute; top: 50%; left: 50%;
+            width: 40px; height: 140px; 
+            margin-top: -140px; margin-left: -20px; 
+            transform-origin: center bottom; 
+            transition: transform 3s cubic-bezier(0.25, 1, 0.5, 1); 
+            z-index: 5; display: flex; flex-direction: column; align-items: center;
+            pointer-events: none;
+        }
+
+        .pointer-needle { 
+            width: 10px; height: 100px; 
+            background: linear-gradient(to top, #333 70%, #555 100%);
+            position: absolute; bottom: 5px; border-radius: 5px;
+            box-shadow: 0px 0px 5px rgba(0,0,0,0.5); z-index: 1;
+            clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+        }
+
+        .dragonfly-body { 
+            font-size: 50px; position: absolute; bottom: 75px; z-index: 2; 
+            transform: rotate(0deg); line-height: 1;
+            filter: drop-shadow(0px 3px 2px rgba(0,0,0,0.3));
+        }
+
+        .center-pin {
+            position: absolute; top: 50%; left: 50%;
+            width: 20px; height: 20px; background-color: #fff;
+            border: 4px solid #333; border-radius: 50%;
+            transform: translate(-50%, -50%); z-index: 6;
+        }
+
+        /* --- کنترل‌ها و دکمه‌ها --- */
+        .controls {
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+        }
+
+        .spin-btn {
+            padding: 18px 60px; font-size: 28px; font-family: inherit;
+            font-weight: 900; color: white; background-color: #4caf50;
+            border: none; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 8px 20px rgba(76, 175, 80, 0.5); transition: all 0.2s;
+        }
+        .spin-btn:hover { background-color: #43a047; transform: translateY(-3px); }
+        .spin-btn:disabled { background-color: #cccccc; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        .decision-container {
+            display: flex; gap: 30px; opacity: 0; pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .decision-container.active { opacity: 1; pointer-events: auto; }
+
+        .emoji-btn {
+            width: 130px; height: 130px; border-radius: 50%;
+            border: 6px solid #fff; box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; cursor: pointer; transition: all 0.2s;
+            font-family: 'Vazirmatn', sans-serif;
+        }
+
+        .emoji-btn:hover { transform: scale(1.1); }
+        .emoji-btn:active { transform: scale(0.95); }
+
+        .btn-happy { background-color: #e8f5e9; border-color: #4caf50; }
+        .btn-sad { background-color: #ffebee; border-color: #f44336; }
+
+        .emoji-btn .emoji { font-size: 65px; line-height: 1; }
+        .emoji-btn .text { font-size: 18px; font-weight: 900; margin-top: 5px; }
+        
+        .btn-happy .text { color: #2e7d32; }
+        .btn-sad .text { color: #c62828; }
+
+        /* --- پیام‌ها --- */
+        #message-box {
+            font-size: 26px; font-weight: 900; color: #d32f2f;
+            min-height: 50px; text-align: center; margin-bottom: 10px;
+            padding: 15px 30px; background: #fff; border-radius: 15px;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.1); min-width: 500px;
+            transition: all 0.3s; z-index: 10;
+            display: flex; justify-content: center; align-items: center; gap: 10px;
+        }
+
+        .color-badge {
+            display: inline-block; width: 24px; height: 24px;
+            border-radius: 6px; border: 2px solid #555;
+            vertical-align: middle; margin: 0 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            50% { transform: translateX(10px); }
+            75% { transform: translateX(-10px); }
+            100% { transform: translateX(0); }
+        }
+        .shake { animation: shake 0.4s; color: #d32f2f !important; }
+
+        /* --- کادر جشن --- */
+        #win-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            z-index: 1000; opacity: 0; pointer-events: none;
+            transition: opacity 0.5s ease; background: transparent;
+        }
+
+        #win-overlay.active { opacity: 1; pointer-events: auto; }
+
+        .win-card {
+            background: white; padding: 40px 80px; border-radius: 30px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3); text-align: center;
+            transform: scale(0.5);
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 8px solid #ffeb3b; position: relative; z-index: 1001;
+            display: flex; flex-direction: column; align-items: center;
+        }
+
+        #win-overlay.active .win-card { transform: scale(1); }
+
+        .win-card h1 {
+            font-size: 50px; color: #f39c12; margin: 0 0 10px 0;
+            text-shadow: 2px 2px 0px #fff, 4px 4px 0px rgba(0,0,0,0.1);
+        }
+
+        .win-card .emojis {
+            font-size: 60px; margin-bottom: 20px;
+            animation: bounce 1s infinite alternate;
+        }
+
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-15px); }
+        }
+
+        .win-card-credits {
+            font-size: 18px; font-weight: 900; color: #00796b;
+            background: #e0f2f1; padding: 10px 25px; border-radius: 15px;
+            margin-bottom: 25px; border: 2px dashed #4db6ac;
+        }
+
+        .restart-btn {
+            padding: 15px 50px; font-size: 28px; font-family: inherit;
+            font-weight: 900; color: white; background-color: #e91e63;
+            border: none; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 8px 20px rgba(233, 30, 99, 0.4); transition: all 0.2s;
+        }
+        .restart-btn:hover { background-color: #d81b60; transform: scale(1.05); }
+
+        @media (max-width: 900px) {
+            :root {
+                --cell-size: 70px; --cell-gap: 6px; --board-padding: 10px;
+                --player-size: 50px; --wheel-size: 220px;
+            }
+            .game-container { padding: 20px; gap: 30px; }
+            .spin-btn { padding: 12px 40px; font-size: 22px; }
+            .emoji-btn { width: 100px; height: 100px; }
+            .emoji-btn .emoji { font-size: 50px; }
+            #message-box { font-size: 18px; min-width: 280px; }
+            .dragonfly-pointer { height: 100px; margin-top: -100px; width: 30px; margin-left: -15px; }
+            .pointer-needle { height: 70px; width: 8px; }
+            .dragonfly-body { font-size: 40px; bottom: 50px; }
+            .win-card { padding: 30px; width: 90%; }
+            .win-card h1 { font-size: 30px; }
+            .win-card .emojis { font-size: 40px; }
+            #score-board, #move-board { font-size: 16px; padding: 8px 10px; }
+            #mute-btn { width: 50px; height: 50px; font-size: 24px; }
+            .color-badge { width: 18px; height: 18px; }
+            #credits-footer { font-size: 12px; padding: 6px 15px; }
+            .win-card-credits { font-size: 14px; padding: 8px 15px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="flower-rain"></div>
+    <button id="mute-btn" onclick="toggleMute()">🔊</button>
+    
+    <div id="credits-footer">تهیه کننده: سینا توپالی - کلاس زنبق</div>
+
+    <div id="top-bar">
+        <div id="score-board">ستاره‌ها: <span id="star-count">0</span> ⭐</div>
+        <div id="move-board">حرکت‌ها: <span id="move-count">0</span> 👣</div>
+    </div>
+
+    <div id="message-box">برای شروع، دکمه «بچرخون» را بزن!</div>
+
+    <div class="game-container">
+        <div class="board-wrapper">
+            <div class="board" id="board">
+                <div class="player" id="player"><span id="player-emoji">🧒</span></div>
+            </div>
+        </div>
+
+        <div class="wheel-section">
+            <div class="wheel-container">
+                <span class="fixed-arrow arrow-up">↑</span>
+                <span class="fixed-arrow arrow-right">→</span>
+                <span class="fixed-arrow arrow-down">↓</span>
+                <span class="fixed-arrow arrow-left">←</span>
+                
+                <div class="dragonfly-pointer" id="pointer">
+                    <div class="pointer-needle"></div>
+                    <div class="dragonfly-body">🦋</div>
+                </div>
+                
+                <div class="center-pin"></div>
+            </div>
+            
+            <div class="controls">
+                <button class="spin-btn" id="spinBtn">بچرخون!</button>
+                
+                <div class="decision-container" id="decisionContainer">
+                    <button class="emoji-btn btn-happy" id="btnHappy" onclick="checkDecision(true)">
+                        <span class="emoji">😃</span>
+                        <span class="text">میشه رفت</span>
+                    </button>
+                    <button class="emoji-btn btn-sad" id="btnSad" onclick="checkDecision(false)">
+                        <span class="emoji">☹️</span>
+                        <span class="text">نمی‌شه رفت</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="win-overlay">
+        <div class="win-card">
+            <h1>🎉 تبریک! برنده شدی! 🎉</h1>
+            <p style="font-size: 22px; font-weight: bold; color: #d32f2f; margin-bottom: 20px;" id="final-moves-text">تو تونستی در 0 حرکت به پایان برسی!</p>
+            <div class="emojis">🌸 🎊 🌟 🎈 🏆</div>
+            <div class="win-card-credits">تهیه کننده: سینا توپالی - کلاس زنبق</div>
+            <button class="restart-btn" onclick="resetGame()">بازی مجدد</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // بخش صدا (با مدیریت خطا برای مرورگرهای مختلف)
+        // ==========================================
+        let audioCtx = null;
+        let isMuted = false;
+        let bgMusicInterval = null;
+        let bgMusicIndex = 0;
+        let flowerRainInterval = null; 
+        
+        const bgMelody = [
+            261.63, 329.63, 392.00, 523.25, 392.00, 329.63, 
+            293.66, 349.23, 440.00, 587.33, 440.00, 349.23, 
+            261.63, 329.63, 392.00, 523.25, 523.25, 392.00  
+        ];
+
+        function initAudio() {
+            try {
+                if (!audioCtx) { 
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) {
+                        audioCtx = new AudioContext(); 
+                    }
+                }
+                if (audioCtx && audioCtx.state === 'suspended') { 
+                    audioCtx.resume(); 
+                }
+            } catch (e) {
+                console.log("Audio not supported or blocked");
+                isMuted = true; // اگر ارور داد، صدا را کلاً خاموش کن تا بازی کرش نکند
+            }
+        }
+
+        function playTone(freq, duration, type = 'sine', vol = 0.1) {
+            if (!audioCtx || isMuted) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type; osc.frequency.value = freq;
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        }
+
+        function startBgMusic() {
+            if (bgMusicInterval || isMuted) return;
+            bgMusicInterval = setInterval(() => {
+                if (!audioCtx) return;
+                const freq = bgMelody[bgMusicIndex % bgMelody.length];
+                playTone(freq, 0.2, 'triangle', 0.05); 
+                bgMusicIndex++;
+            }, 250);
+        }
+
+        function stopBgMusic() {
+            if (bgMusicInterval) { clearInterval(bgMusicInterval); bgMusicInterval = null; }
+        }
+
+        function playStepSound() {
+            if (!audioCtx || isMuted) return;
+            playTone(800, 0.1, 'sine', 0.2); 
+            setTimeout(() => playTone(1200, 0.2, 'sine', 0.2), 50);
+        }
+
+        function playErrorSound() {
+            if (!audioCtx || isMuted) return;
+            playTone(150, 0.2, 'sawtooth', 0.1); 
+            setTimeout(() => playTone(100, 0.3, 'sawtooth', 0.1), 150);
+        }
+
+        function playVictoryFanfare() {
+            if (!audioCtx || isMuted) return;
+            stopBgMusic();
+            const notes = [523.25, 523.25, 523.25, 523.25, 415.30, 466.16, 523.25, 466.16, 523.25];
+            const durations = [0.1, 0.1, 0.1, 0.3, 0.3, 0.1, 0.3, 0.1, 0.6];
+            let time = 0;
+            notes.forEach((freq, i) => {
+                setTimeout(() => {
+                    playTone(freq, durations[i], 'square', 0.15);
+                    playTone(freq/2, durations[i], 'triangle', 0.1); 
+                }, time * 1000);
+                time += durations[i];
+            });
+        }
+
+        function toggleMute() {
+            isMuted = !isMuted;
+            document.getElementById('mute-btn').textContent = isMuted ? '🔇' : '🔊';
+            if (isMuted) { stopBgMusic(); } 
+            else { if (gameState === 'spin' || gameState === 'decision' || gameState === 'drag') { startBgMusic(); } }
+        }
+
+        // ==========================================
+        // منطق بازی
+        // ==========================================
+        const GRID_SIZE = 4;
+        const board = document.getElementById('board');
+        const player = document.getElementById('player');
+        const playerEmoji = document.getElementById('player-emoji');
+        const pointer = document.getElementById('pointer');
+        const spinBtn = document.getElementById('spinBtn');
+        const messageBox = document.getElementById('message-box');
+        const decisionContainer = document.getElementById('decisionContainer');
+        const winOverlay = document.getElementById('win-overlay');
+        const starCountElement = document.getElementById('star-count');
+        const moveCountElement = document.getElementById('move-count');
+        const scoreBoard = document.getElementById('score-board');
+        const moveBoard = document.getElementById('move-board');
+        const flowerRainContainer = document.getElementById('flower-rain');
+        const finalMovesText = document.getElementById('final-moves-text');
+
+        const START_ROW = 3, START_COL = 0;
+        const END_ROW = 0, END_COL = 3;
+
+        let currentRow = START_ROW; 
+        let currentCol = START_COL; 
+        let currentRotation = 0; 
+        let stars = 0;
+        let totalMoves = 0; 
+        
+        let targetDirection = null; 
+        let targetDirName = "";
+
+        let gameState = 'spin'; 
+
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+
+        const praises = [
+            "آفرین قهرمان! 🌟", "عالی بود! 👏", "چه باهوشی! 🧠",
+            "دقیقاً درست! ✅", "ادامه بده! 🚀", "حرکت عالی! 🎯"
+        ];
+
+        const colorData = {
+            "up": { name: "بالا (نارنجی)", hex: "#f39c12", deg: 0 },
+            "right": { name: "راست (سبز)", hex: "#8bc34a", deg: 90 },
+            "down": { name: "پایین (آبی)", hex: "#03a9f4", deg: 180 },
+            "left": { name: "چپ (زرد)", hex: "#ffeb3b", deg: 270 }
+        };
+
+        function getColorBadgeHTML(direction) {
+            const hex = colorData[direction].hex;
+            return `<span class="color-badge" style="background-color: ${hex};"></span>`;
+        }
+
+        function getSizes() {
+            const rootStyles = getComputedStyle(document.documentElement);
+            const cellSize = parseInt(rootStyles.getPropertyValue('--cell-size')) || 70;
+            const gap = parseInt(rootStyles.getPropertyValue('--cell-gap')) || 6;
+            const padding = parseInt(rootStyles.getPropertyValue('--board-padding')) || 10;
+            const playerSize = parseInt(rootStyles.getPropertyValue('--player-size')) || 50;
+            return { cellSize, gap, padding, playerSize, step: cellSize + gap };
+        }
+
+        function createBoard() {
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    if (r === START_ROW && c === START_COL) {
+                        cell.classList.add('start-cell'); cell.textContent = 'شروع';
+                    } else if (r === END_ROW && c === END_COL) {
+                        cell.classList.add('end-cell'); cell.textContent = 'پایان';
+                    }
+                    board.insertBefore(cell, player);
+                }
+            }
+            updatePlayerPosition(true);
+        }
+
+        function updatePlayerPosition(resetTransform = true) {
+            const { padding, playerSize, step } = getSizes();
+            const offset = (step - playerSize) / 2;
+            if (resetTransform) {
+                player.style.transition = 'transform 0.3s ease, left 0.3s ease, top 0.3s ease';
+                player.style.transform = `translate(0px, 0px)`;
+            }
+            player.style.left = `${padding + (currentCol * step) + offset}px`;
+            player.style.top = `${padding + (currentRow * step) + offset}px`;
+        }
+
+        spinBtn.addEventListener('click', () => {
+            if (gameState !== 'spin') return;
+            if (currentRow === END_ROW && currentCol === END_COL) { return; }
+
+            initAudio();
+            startBgMusic();
+
+            gameState = 'wait';
+            spinBtn.disabled = true;
+            decisionContainer.classList.remove('active'); 
+            
+            messageBox.innerHTML = "سنجاقک در حال چرخش است...";
+            messageBox.style.color = "#1976d2";
+            messageBox.className = "";
+
+            let randomDeg;
+            
+            if (totalMoves >= 12) { 
+                let validDegrees = [];
+                if (currentRow > 0) validDegrees.push(colorData.up.deg); 
+                if (currentCol < 3) validDegrees.push(colorData.right.deg);
+                if (currentRow < 3) validDegrees.push(colorData.down.deg); 
+                if (currentCol > 0) validDegrees.push(colorData.left.deg); 
+
+                let preferredDegrees = validDegrees.filter(d => d === colorData.up.deg || d === colorData.right.deg);
+                
+                let chosenDeg;
+                if (preferredDegrees.length > 0) {
+                    chosenDeg = preferredDegrees[Math.floor(Math.random() * preferredDegrees.length)];
+                } else {
+                    chosenDeg = validDegrees[Math.floor(Math.random() * validDegrees.length)];
+                }
+                
+                randomDeg = chosenDeg + (Math.floor(Math.random() * 40) - 20); 
+                
+            } else {
+                randomDeg = Math.floor(Math.random() * 360);
+            }
+
+            const currentBase = Math.ceil(currentRotation / 360) * 360;
+            currentRotation = currentBase + 360 * 3 + randomDeg; 
+            
+            pointer.style.transform = `rotate(${currentRotation}deg)`;
+
+            setTimeout(() => {
+                const finalAngle = (currentRotation % 360 + 360) % 360; 
+                
+                if (finalAngle >= 315 || finalAngle < 45) { targetDirection = "up"; }
+                else if (finalAngle >= 45 && finalAngle < 135) { targetDirection = "right"; }
+                else if (finalAngle >= 135 && finalAngle < 225) { targetDirection = "down"; }
+                else { targetDirection = "left"; }
+                
+                targetDirName = colorData[targetDirection].name;
+
+                gameState = 'decision';
+                decisionContainer.classList.add('active');
+                messageBox.innerHTML = `سنجاقک روی ${getColorBadgeHTML(targetDirection)} ${targetDirName} ایستاد. می‌تونی بری؟`;
+                messageBox.style.color = "#1976d2";
+            }, 3000); 
+        });
+
+        window.checkDecision = function(userSaysCanMove) {
+            if (gameState !== 'decision') return;
+
+            let newRow = currentRow;
+            let newCol = currentCol;
+
+            if (targetDirection === "up") newRow--;
+            if (targetDirection === "down") newRow++;
+            if (targetDirection === "left") newCol--;
+            if (targetDirection === "right") newCol++;
+
+            const isBlocked = (newRow < 0 || newRow >= GRID_SIZE || newCol < 0 || newCol >= GRID_SIZE);
+
+            if (userSaysCanMove) {
+                if (isBlocked) {
+                    showError(`آخ! دیوار جلوی راهه. نمی‌تونی بری! دکمه ☹️ رو بزن.`);
+                } else {
+                    gameState = 'drag';
+                    decisionContainer.classList.remove('active');
+                    messageBox.innerHTML = `عالی! حالا مهره 🧒 رو بگیر و به سمت ${getColorBadgeHTML(targetDirection)} ${targetDirName} بکش!`;
+                    messageBox.style.color = "#e65100";
+                }
+            } else {
+                if (!isBlocked) {
+                    showError(`آخ! راه بازه، می‌تونی بری! دکمه 😃 رو بزن.`);
+                } else {
+                    messageBox.innerHTML = "آفرین! درست تشخیص دادی. دیوار بود. حالا دوباره بچرخون.";
+                    messageBox.style.color = "#2e7d32";
+                    gameState = 'spin';
+                    decisionContainer.classList.remove('active');
+                    spinBtn.disabled = false;
+                    spinBtn.textContent = "بچرخون!";
+                }
+            }
+        }
+
+        // بخش لمس و موس
+        function startDrag(clientX, clientY) {
+            if (gameState !== 'drag') return; 
+            isDragging = true;
+            startX = clientX;
+            startY = clientY;
+            player.style.transition = 'none'; 
+        }
+
+        function moveDrag(clientX, clientY) {
+            if (!isDragging) return;
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+            player.style.transform = `translate(${dx}px, ${dy}px)`;
+        }
+
+        function endDrag(clientX, clientY) {
+            if (!isDragging) return;
+            isDragging = false;
+            
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance > 30) {
+                let userDirection = "";
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    userDirection = dx > 0 ? "right" : "left";
+                } else {
+                    userDirection = dy > 0 ? "down" : "up";
+                }
+                attemptDragMove(userDirection);
+            } else {
+                updatePlayerPosition(true); 
+            }
+        }
+
+        player.addEventListener('mousedown', (e) => { e.preventDefault(); startDrag(e.clientX, e.clientY); });
+        window.addEventListener('mousemove', (e) => { if(isDragging) { e.preventDefault(); moveDrag(e.clientX, e.clientY); } });
+        window.addEventListener('mouseup', (e) => { endDrag(e.clientX, e.clientY); });
+
+        player.addEventListener('touchstart', (e) => { 
+            if(e.cancelable) e.preventDefault(); 
+            startDrag(e.touches[0].clientX, e.touches[0].clientY); 
+        }, {passive: false});
+        
+        window.addEventListener('touchmove', (e) => { 
+            if(isDragging) {
+                if(e.cancelable) e.preventDefault(); 
+                moveDrag(e.touches[0].clientX, e.touches[0].clientY); 
+            }
+        }, {passive: false});
+        
+        window.addEventListener('touchend', (e) => { 
+            if(isDragging) { endDrag(e.changedTouches[0].clientX, e.changedTouches[0].clientY); }
+        });
+
+        window.addEventListener('touchcancel', (e) => { 
+            if(isDragging) { isDragging = false; updatePlayerPosition(true); }
+        });
+
+        function attemptDragMove(userDirection) {
+            if (userDirection !== targetDirection) {
+                messageBox.innerHTML = `آخ! مهره رو به سمت ${getColorBadgeHTML(targetDirection)} ${targetDirName} بکش!`;
+                messageBox.className = "shake";
+                player.classList.add('shake');
+                playErrorSound();
+                
+                setTimeout(() => {
+                    messageBox.className = "";
+                    player.classList.remove('shake');
+                    updatePlayerPosition(true); 
+                }, 600);
+                return;
+            }
+
+            let newRow = currentRow;
+            let newCol = currentCol;
+            if (userDirection === "up") newRow--;
+            if (userDirection === "down") newRow++;
+            if (userDirection === "left") newCol--;
+            if (userDirection === "right") newCol++;
+
+            currentRow = newRow;
+            currentCol = newCol;
+            
+            totalMoves++;
+            moveCountElement.textContent = totalMoves;
+            moveBoard.classList.add('bump');
+            setTimeout(() => moveBoard.classList.remove('bump'), 200);
+
+            updatePlayerPosition(true);
+            
+            gameState = 'wait';
+
+            if (currentRow === END_ROW && currentCol === END_COL) {
+                gameState = 'end';
+                messageBox.innerHTML = "آفرین! به خط پایان رسیدی!";
+                messageBox.style.color = "#388e3c";
+                setTimeout(() => {
+                    triggerCelebration(); 
+                }, 500);
+            } else {
+                giveStepReward(); 
+                setTimeout(() => {
+                    spinBtn.disabled = false;
+                    spinBtn.textContent = "بچرخون!";
+                    messageBox.innerHTML = "عالی بود! حالا دوباره دکمه بچرخون رو بزن.";
+                    messageBox.style.color = "#d32f2f";
+                    gameState = 'spin';
+                }, 1200);
+            }
+        }
+
+        function giveStepReward() {
+            playStepSound();
+            playerEmoji.textContent = '😊';
+            player.classList.add('step-bounce');
+            
+            const { padding, playerSize, step } = getSizes();
+            const offset = (step - playerSize) / 2;
+            const playerX = padding + (currentCol * step) + offset + (playerSize / 2);
+            const playerY = padding + (currentRow * step) + offset;
+
+            for (let i = 0; i < 5; i++) {
+                createFloatingEmoji(playerX, playerY, ['❤️', '💖', '💕', '❤️', '🌟']);
+            }
+
+            stars++;
+            starCountElement.textContent = stars;
+            scoreBoard.classList.add('bump');
+            
+            const randomPraise = praises[Math.floor(Math.random() * praises.length)];
+            messageBox.textContent = randomPraise;
+            messageBox.style.color = "#e65100";
+
+            setTimeout(() => {
+                playerEmoji.textContent = '🧒';
+                player.classList.remove('step-bounce');
+                scoreBoard.classList.remove('bump');
+            }, 800);
+        }
+
+        function createFloatingEmoji(x, y, allowedEmojis) {
+            const emoji = document.createElement('div');
+            emoji.classList.add('floating-emoji');
+            emoji.textContent = allowedEmojis[Math.floor(Math.random() * allowedEmojis.length)];
+            
+            const randomOffsetX = (Math.random() - 0.5) * 60;
+            const randomOffsetY = (Math.random() - 0.5) * 20;
+
+            emoji.style.left = `${x + randomOffsetX}px`;
+            emoji.style.top = `${y + randomOffsetY}px`;
+            emoji.style.animationDelay = `${Math.random() * 0.2}s`;
+
+            board.appendChild(emoji);
+            setTimeout(() => emoji.remove(), 1200);
+        }
+
+        function showError(msg) {
+            playErrorSound();
+            messageBox.innerHTML = msg;
+            messageBox.className = "shake";
+            player.classList.add('shake'); 
+            setTimeout(() => {
+                messageBox.className = "";
+                player.classList.remove('shake');
+            }, 600);
+        }
+
+        function startFlowerRain() {
+            if (flowerRainInterval) return; 
+            
+            const flowers = ['🌸', '🌺', '🌻', '🌹', '🎉', '🎊', '⭐', '✨', '🎈'];
+            
+            flowerRainInterval = setInterval(() => {
+                const el = document.createElement('div');
+                el.classList.add('falling-emoji');
+                el.textContent = flowers[Math.floor(Math.random() * flowers.length)];
+                el.style.left = Math.random() * 100 + 'vw';
+                el.style.fontSize = (Math.random() * 30 + 20) + 'px';
+                el.style.animationDuration = (Math.random() * 2 + 2.5) + 's'; 
+                el.style.opacity = Math.random() * 0.5 + 0.5;
+                
+                flowerRainContainer.appendChild(el);
+                setTimeout(() => el.remove(), 4500);
+            }, 80); 
+        }
+
+        function triggerCelebration() {
+            playVictoryFanfare();
+
+            playerEmoji.textContent = '🥳';
+            player.classList.add('victory-dance');
+
+            finalMovesText.textContent = `تو تونستی در ${totalMoves} حرکت به پایان برسی!`;
+
+            startFlowerRain();
+
+            // بررسی می‌کنیم که آیا کتابخانه کاغذرنگی لود شده است یا خیر (برای اینترنت ضعیف)
+            if (typeof confetti === 'function') {
+                var duration = 6 * 1000;
+                var animationEnd = Date.now() + duration;
+                var defaults = { startVelocity: 40, spread: 360, ticks: 80, zIndex: 900 };
+
+                function randomInRange(min, max) { return Math.random() * (max - min) + min; }
+
+                var interval = setInterval(function() {
+                    var timeLeft = animationEnd - Date.now();
+                    if (timeLeft <= 0) { return clearInterval(interval); }
+
+                    var particleCount = 80 * (timeLeft / duration);
+                    try {
+                        confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.1, 0.4), y: Math.random() - 0.2 } }));
+                        confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.6, 0.9), y: Math.random() - 0.2 } }));
+                    } catch(e) {}
+                }, 250);
+            }
+
+            setTimeout(() => {
+                winOverlay.classList.add('active');
+                messageBox.textContent = "🏆 به خط پایان رسیدی! 🏆";
+                messageBox.style.color = "#388e3c";
+            }, 4000); 
+        }
+
+        function resetGame() {
+            currentRow = START_ROW;
+            currentCol = START_COL;
+            
+            winOverlay.classList.remove('active');
+            player.classList.remove('victory-dance');
+            playerEmoji.textContent = '🧒';
+            
+            if (flowerRainInterval) {
+                clearInterval(flowerRainInterval);
+                flowerRainInterval = null;
+            }
+            flowerRainContainer.innerHTML = '';
+            
+            updatePlayerPosition(true);
+            
+            stars = 0;
+            totalMoves = 0; 
+            starCountElement.textContent = stars;
+            moveCountElement.textContent = totalMoves;
+
+            messageBox.innerHTML = "بازی جدید! دکمه را بزن.";
+            messageBox.className = "";
+            messageBox.style.color = "#d32f2f";
+            
+            gameState = 'spin';
+            decisionContainer.classList.remove('active');
+            spinBtn.disabled = false;
+            spinBtn.textContent = "بچرخون!";
+            
+            currentRotation = 0;
+            pointer.style.transition = 'none'; 
+            pointer.style.transform = `rotate(0deg)`;
+            setTimeout(() => { pointer.style.transition = 'transform 3s cubic-bezier(0.25, 1, 0.5, 1)'; }, 50);
+
+            startBgMusic();
+        }
+
+        createBoard();
+        window.addEventListener('resize', () => { updatePlayerPosition(true); });
+    </script>
+</body>
+</html>
